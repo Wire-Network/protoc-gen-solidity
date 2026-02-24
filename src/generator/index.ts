@@ -1,0 +1,5 @@
+export { generateSolFile } from "./message.js"
+export { generateRuntime } from "./runtime.js"
+export type { MessageDescriptor } from "./message.js"
+export type { FieldInfo } from "./field.js"
+export { PROTO_TYPE_MAP, WireType, resolveSolType, fieldTag } from "./type-map.js"

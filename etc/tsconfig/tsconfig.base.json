@@ -1,0 +1,39 @@
+{
+  "compileOnSave": false,
+  "compilerOptions": {
+    "declaration": true,
+    "declarationMap": true,
+    "lib": ["ESNext"],
+    "allowJs": false,
+    "module": "ESNext",
+    "moduleDetection": "force",
+    "moduleResolution": "bundler",
+    "composite": true,
+    "incremental": true,
+    "skipDefaultLibCheck": true,
+    "noFallthroughCasesInSwitch": true,
+    "allowSyntheticDefaultImports": true,
+    "noImplicitAny": false,
+    "disableSizeLimit": false,
+    "preserveConstEnums": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "inlineSourceMap": true,
+    "inlineSources": true,
+    "sourceMap": false,
+    "skipLibCheck": true,
+    "target": "ES2022",
+    "strict": false
+  },
+  "include": ["src"],
+  "exclude": [
+    "lib",
+    "dist",
+    "node_modules",
+    "**/*.js",
+    "**/lib/**",
+    "**/dist/**",
+    "**/node_modules/**"
+  ]
+}
