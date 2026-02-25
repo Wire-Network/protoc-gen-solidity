@@ -15,7 +15,7 @@
     "bundle": "node esbuild.config.js",
     "bundle:dev": "node esbuild.config.js -w",
     "dev": "concurrently npm:build:dev npm:bundle:dev",
-    "dist": "pnpm build && pnpm bundle && pkg -c package.json --output dist/bin/protoc-gen-solidity -d -t node24-linux --options experimental-require-module dist/bundle/protoc-gen-solidity.mjs",
+    "dist": "pnpm build && pnpm bundle && pkg -c package.json --output dist/bin/protoc-gen-solidity -d --options experimental-require-module dist/bundle/protoc-gen-solidity.mjs",
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
     "generate:test": "npm run dist && mkdir -p ./dist/tests/generated && npx protoc --plugin=protoc-gen-solidity=./dist/bin/protoc-gen-solidity --solidity_out=./dist/tests/generated tests/protos/*.proto",
     "postinstall": "npm run dist",
