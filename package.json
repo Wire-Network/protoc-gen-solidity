@@ -34,12 +34,12 @@
     "README.md"
   ],
   "dependencies": {
+    "@yao-pkg/pkg": "^6.14.1",
     "protobufjs": "^8.0.0",
     "tracer": "^1.3.0"
   },
   "devDependencies": {
     "@types/node": "^25.3.0",
-    "@yao-pkg/pkg": "^6.14.1",
     "esbuild": "^0.27.3",
     "prettier": "^3.8.1",
     "protoc": "^29.6.0",
