@@ -4,6 +4,7 @@
     "declaration": true,
     "declarationMap": true,
     "lib": ["ESNext"],
+    "types": ["node"],
     "allowJs": false,
     "module": "ESNext",
     "moduleDetection": "force",
