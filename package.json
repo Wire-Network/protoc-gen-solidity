@@ -1,6 +1,6 @@
 {
   "name": "@wireio/protoc-gen-solidity",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "protoc plugin generating Solidity encode/decode libraries from protobuf3 definitions",
   "private": false,
   "type": "module",
