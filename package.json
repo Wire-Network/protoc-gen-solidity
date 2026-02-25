@@ -7,7 +7,7 @@
   "types": "lib/index.d.ts",
   "module": "dist/bundle/protoc-gen-solidity.mjs",
   "bin": {
-    "protoc-gen-solidity": "dist/bundle/protoc-gen-solidity.mjs"
+    "protoc-gen-solidity": "dist/bin/protoc-gen-solidity"
   },
   "scripts": {
     "build": "tsc -b tsconfig.json",
@@ -18,6 +18,7 @@
     "dist": "pnpm build && pnpm bundle && pkg -c package.json --output dist/bin/protoc-gen-solidity -d -t node24-linux --options experimental-require-module dist/bundle/protoc-gen-solidity.mjs",
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
     "generate:test": "npm run dist && mkdir -p ./dist/tests/generated && npx protoc --plugin=protoc-gen-solidity=./dist/bin/protoc-gen-solidity --solidity_out=./dist/tests/generated tests/protos/*.proto",
+    "postinstall": "npm run dist",
     "clean": "rm -rf lib dist"
   },
   "pkg": {
@@ -27,6 +28,7 @@
   },
   "files": [
     "lib",
+    "dist/bin",
     "dist/bundle",
     "sol",
     "README.md"
