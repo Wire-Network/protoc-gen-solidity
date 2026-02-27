@@ -22,12 +22,12 @@ protoc \
 ```
 .proto → protoc --plugin=protoc-gen-solidity
           ├── ProtobufRuntime.sol    (shared wire format primitives)
-          └── Example.pb.sol         (struct + codec library per message)
+          └── Example.sol         (struct + codec library per message)
 ```
 
 ### Generated Output
 
-Each `.proto` file produces a single `.pb.sol` containing:
+Each `.proto` file produces a single `.sol` containing:
 
 - **Struct definitions** — one per message (maps become parallel arrays)
 - **Codec libraries** — `MessageNameCodec.encode(msg) → bytes` and

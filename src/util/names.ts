@@ -27,7 +27,7 @@ export function codecLibName(messageName: string): string {
  * Generate output .sol filename for a given .proto file, optionally rooted
  * under a directory derived from the proto package name.
  * e.g. "my_service.proto" with package "example.nested"
- *      → "example/nested/MyService.pb.sol"
+ *      → "example/nested/MyService.sol"
  */
 export function protoFileToSolFile(protoFile: string, packageName?: string): string {
   const base = protoFile.replace(/\.proto$/, "")
@@ -37,7 +37,7 @@ export function protoFileToSolFile(protoFile: string, packageName?: string): str
     .split(/[_\-.]/)
     .map(s => s.charAt(0).toUpperCase() + s.slice(1))
     .join("")
-  const solBasename = `${pascal}.pb.sol`
+  const solBasename = `${pascal}.sol`
   if (!packageName) return solBasename
   const dir = packageName.split(".").join("/")
   return `${dir}/${solBasename}`
