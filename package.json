@@ -10,12 +10,14 @@
     "protoc-gen-solidity": "dist/bin/protoc-gen-solidity"
   },
   "scripts": {
-    "build": "tsc -b tsconfig.json",
-    "build:dev": "tsc -b tsconfig.json -w",
+    "compile": "tsc -b tsconfig.json",
+    "compile:dev": "tsc -b tsconfig.json -w",
     "bundle": "node esbuild.config.js",
     "bundle:dev": "node esbuild.config.js -w",
-    "dev": "concurrently npm:build:dev npm:bundle:dev",
-    "dist": "pnpm build && pnpm bundle && pkg -c package.json --output dist/bin/protoc-gen-solidity -d --options experimental-require-module dist/bundle/protoc-gen-solidity.mjs",
+    "build": "pnpm run compile && pnpm run bundle",
+    "build:dev": "concurrently npm:compile:dev npm:bundle:dev",
+    "dev": "pnpm run build:dev",
+    "dist": "pnpm build && pkg -c package.json --output dist/bin/protoc-gen-solidity -d --options experimental-require-module dist/bundle/protoc-gen-solidity.mjs",
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
     "generate:test": "npm run dist && mkdir -p ./dist/tests/generated && npx protoc --plugin=protoc-gen-solidity=./dist/bin/protoc-gen-solidity --solidity_out=./dist/tests/generated tests/protos/*.proto",
     "postinstall": "npm run dist",

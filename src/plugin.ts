@@ -1,8 +1,8 @@
 import * as protobuf from "protobufjs"
 import { log, setLogLevel } from "./util/logger.js"
-import { protoFileToSolFile } from "./util/names.js"
+import { protoFileToSolFile, runtimeImportPath } from "./util/names.js"
 import { generateSolFile, generateRuntime } from "./generator/index.js"
-import type { MessageDescriptor, FieldInfo } from "./generator/index.js"
+import type { MessageDescriptor, FieldInfo, TypeRegistry } from "./generator/index.js"
 
 // ── Protobuf schema for the plugin protocol ───────────────────────────
 // Defined programmatically so the plugin is fully self-contained
@@ -130,6 +130,10 @@ function processRequest(stdin: Buffer): PluginResult {
     content: generateRuntime()
   })
 
+  // Build a global registry of all message types across all proto files
+  // (including dependencies that aren't in filesToGenerate)
+  const typeRegistry = buildTypeRegistry(protoFiles)
+
   // Process each requested proto file
   for (const protoFile of protoFiles) {
     const fileName: string = protoFile.name ?? ""
@@ -144,13 +148,42 @@ function processRequest(stdin: Buffer): PluginResult {
     }
 
     const solFileName = protoFileToSolFile(fileName, protoFile.package ?? "")
-    const solContent = generateSolFile(messages, fileName)
+    const solContent = generateSolFile(
+      messages,
+      fileName,
+      runtimeImportPath(solFileName),
+      solFileName,
+      typeRegistry
+    )
 
     files.push({ name: solFileName, content: solContent })
     log.info("Generated %s (%d messages)", solFileName, messages.length)
   }
 
   return { files }
+}
+
+/**
+ * Build a registry mapping fully-qualified type names (e.g. ".sysio.opp.types.ChainId")
+ * to their source proto file and package. Walks ALL proto files including dependencies.
+ */
+function buildTypeRegistry(protoFiles: any[]): TypeRegistry {
+  const registry: TypeRegistry = new Map()
+
+  function registerMessages(messages: any[], parentFqn: string, fileName: string, pkg: string) {
+    for (const msg of messages) {
+      const name: string = msg.name ?? ""
+      const fqn = `.${parentFqn ? parentFqn + "." : ""}${name}`
+      registry.set(fqn, { protoFile: fileName, package: pkg })
+      registerMessages(msg.nested_type ?? [], fqn.slice(1), fileName, pkg)
+    }
+  }
+
+  for (const pf of protoFiles) {
+    registerMessages(pf.message_type ?? [], pf.package ?? "", pf.name ?? "", pf.package ?? "")
+  }
+
+  return registry
 }
 
 /**

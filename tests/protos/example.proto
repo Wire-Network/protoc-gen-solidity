@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package example;
+package example.nested.test;
 
 // Exercises: scalars, nested messages, repeated, enums, map, oneof
 message UserProfile {
