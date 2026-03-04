@@ -1,8 +1,8 @@
 import * as protobuf from "protobufjs"
 import { log, setLogLevel } from "./util/logger.js"
-import { protoFileToSolFile, runtimeImportPath } from "./util/names.js"
-import { generateSolFile, generateRuntime } from "./generator/index.js"
-import type { MessageDescriptor, FieldInfo, TypeRegistry } from "./generator/index.js"
+import { protoFileToSolFile, runtimeImportPath, protoNameToSol } from "./util/names.js"
+import { generateSolFile, generateRuntime, computeUnderlyingType } from "./generator/index.js"
+import type { MessageDescriptor, FieldInfo, TypeRegistry, EnumDescriptor, EnumRegistry } from "./generator/index.js"
 
 // ── Protobuf schema for the plugin protocol ───────────────────────────
 // Defined programmatically so the plugin is fully self-contained
@@ -44,10 +44,20 @@ const FieldDescriptorProto = new protobuf.Type("FieldDescriptorProto")
 const MessageOptions = new protobuf.Type("MessageOptions")
   .add(new protobuf.Field("map_entry", 7, "bool", "optional"))
 
+const EnumValueDescriptorProto = new protobuf.Type("EnumValueDescriptorProto")
+  .add(new protobuf.Field("name", 1, "string", "optional"))
+  .add(new protobuf.Field("number", 2, "int32", "optional"))
+
+const EnumDescriptorProtoMsg = new protobuf.Type("EnumDescriptorProto")
+  .add(new protobuf.Field("name", 1, "string", "optional"))
+  .add(new protobuf.Field("value", 2, "EnumValueDescriptorProto", "repeated"))
+  .add(EnumValueDescriptorProto)
+
 const DescriptorProto = new protobuf.Type("DescriptorProto")
   .add(new protobuf.Field("name", 1, "string", "optional"))
   .add(new protobuf.Field("field", 2, "FieldDescriptorProto", "repeated"))
   .add(new protobuf.Field("nested_type", 3, "DescriptorProto", "repeated"))
+  .add(new protobuf.Field("enum_type", 4, "EnumDescriptorProto", "repeated"))
   .add(new protobuf.Field("options", 7, "MessageOptions", "optional"))
   .add(FieldDescriptorProto)
   .add(MessageOptions)
@@ -57,6 +67,7 @@ const FileDescriptorProto = new protobuf.Type("FileDescriptorProto")
   .add(new protobuf.Field("package", 2, "string", "optional"))
   .add(new protobuf.Field("dependency", 3, "string", "repeated"))
   .add(new protobuf.Field("message_type", 4, "DescriptorProto", "repeated"))
+  .add(new protobuf.Field("enum_type", 5, "EnumDescriptorProto", "repeated"))
   .add(new protobuf.Field("syntax", 12, "string", "optional"))
   .add(DescriptorProto)
 
@@ -65,6 +76,7 @@ const googlePb = new protobuf.Namespace("google")
 const protobufNs = new protobuf.Namespace("protobuf")
 const compilerNs = new protobuf.Namespace("compiler")
 
+protobufNs.add(EnumDescriptorProtoMsg)
 protobufNs.add(FileDescriptorProto)
 compilerNs.add(CodeGeneratorRequest)
 compilerNs.add(CodeGeneratorResponse)
@@ -130,9 +142,9 @@ function processRequest(stdin: Buffer): PluginResult {
     content: generateRuntime()
   })
 
-  // Build a global registry of all message types across all proto files
-  // (including dependencies that aren't in filesToGenerate)
+  // Build global registries across all proto files (including dependencies)
   const typeRegistry = buildTypeRegistry(protoFiles)
+  const enumRegistry = buildEnumRegistry(protoFiles)
 
   // Process each requested proto file
   for (const protoFile of protoFiles) {
@@ -141,15 +153,19 @@ function processRequest(stdin: Buffer): PluginResult {
 
     log.info("Generating for %s", fileName)
 
-    const messages = extractMessages(protoFile, protoFile.package ?? "")
-    if (messages.length === 0) {
-      log.info("No messages in %s, skipping", fileName)
+    const pkg = protoFile.package ?? ""
+    const messages = extractMessages(protoFile, pkg, enumRegistry)
+    const enums = extractEnums(protoFile, pkg)
+
+    if (messages.length === 0 && enums.length === 0) {
+      log.info("No messages or enums in %s, skipping", fileName)
       continue
     }
 
-    const solFileName = protoFileToSolFile(fileName, protoFile.package ?? "")
+    const solFileName = protoFileToSolFile(fileName, pkg)
     const solContent = generateSolFile(
       messages,
+      enums,
       fileName,
       runtimeImportPath(solFileName),
       solFileName,
@@ -157,7 +173,7 @@ function processRequest(stdin: Buffer): PluginResult {
     )
 
     files.push({ name: solFileName, content: solContent })
-    log.info("Generated %s (%d messages)", solFileName, messages.length)
+    log.info("Generated %s (%d messages, %d enums)", solFileName, messages.length, enums.length)
   }
 
   return { files }
@@ -166,6 +182,7 @@ function processRequest(stdin: Buffer): PluginResult {
 /**
  * Build a registry mapping fully-qualified type names (e.g. ".sysio.opp.types.ChainId")
  * to their source proto file and package. Walks ALL proto files including dependencies.
+ * Registers both message types and enum types.
  */
 function buildTypeRegistry(protoFiles: any[]): TypeRegistry {
   const registry: TypeRegistry = new Map()
@@ -176,11 +193,66 @@ function buildTypeRegistry(protoFiles: any[]): TypeRegistry {
       const fqn = `.${parentFqn ? parentFqn + "." : ""}${name}`
       registry.set(fqn, { protoFile: fileName, package: pkg })
       registerMessages(msg.nested_type ?? [], fqn.slice(1), fileName, pkg)
+      registerEnums(msg.enum_type ?? [], fqn.slice(1), fileName, pkg)
+    }
+  }
+
+  function registerEnums(enums: any[], parentFqn: string, fileName: string, pkg: string) {
+    for (const e of enums) {
+      const name: string = e.name ?? ""
+      const fqn = `.${parentFqn ? parentFqn + "." : ""}${name}`
+      registry.set(fqn, { protoFile: fileName, package: pkg })
     }
   }
 
   for (const pf of protoFiles) {
-    registerMessages(pf.message_type ?? [], pf.package ?? "", pf.name ?? "", pf.package ?? "")
+    const pkg = pf.package ?? ""
+    const fileName = pf.name ?? ""
+    registerMessages(pf.message_type ?? [], pkg, fileName, pkg)
+    registerEnums(pf.enum_type ?? [], pkg, fileName, pkg)
+  }
+
+  return registry
+}
+
+/**
+ * Build a registry of all enum descriptors across all proto files.
+ * Maps fully-qualified enum name (e.g. ".example.Role") to its descriptor.
+ */
+function buildEnumRegistry(protoFiles: any[]): EnumRegistry {
+  const registry: EnumRegistry = new Map()
+
+  function walkEnums(enums: any[], parentFqn: string) {
+    for (const e of enums) {
+      const name: string = e.name ?? ""
+      const fullName = parentFqn ? `${parentFqn}.${name}` : name
+      const fqn = `.${fullName}`
+      const values = (e.value ?? []).map((v: any) => ({
+        name: v.name ?? "",
+        number: v.number ?? 0
+      }))
+      registry.set(fqn, {
+        name,
+        fullName,
+        values,
+        underlyingType: computeUnderlyingType(values)
+      })
+    }
+  }
+
+  function walkMessages(messages: any[], parentFqn: string) {
+    for (const msg of messages) {
+      const name: string = msg.name ?? ""
+      const msgFqn = parentFqn ? `${parentFqn}.${name}` : name
+      walkEnums(msg.enum_type ?? [], msgFqn)
+      walkMessages(msg.nested_type ?? [], msgFqn)
+    }
+  }
+
+  for (const pf of protoFiles) {
+    const pkg = pf.package ?? ""
+    walkEnums(pf.enum_type ?? [], pkg)
+    walkMessages(pf.message_type ?? [], pkg)
   }
 
   return registry
@@ -191,37 +263,89 @@ function buildTypeRegistry(protoFiles: any[]): TypeRegistry {
  */
 function extractMessages(
   protoFile: any,
-  packageName: string
+  packageName: string,
+  enumRegistry: EnumRegistry
 ): MessageDescriptor[] {
   const result: MessageDescriptor[] = []
   const messageTypes: any[] = protoFile.message_type ?? []
 
   for (const msg of messageTypes) {
-    result.push(convertDescriptor(msg, packageName))
+    result.push(convertDescriptor(msg, packageName, enumRegistry))
   }
 
   return result
 }
 
-function convertDescriptor(desc: any, parentFqn: string): MessageDescriptor {
+function convertDescriptor(desc: any, parentFqn: string, enumRegistry: EnumRegistry): MessageDescriptor {
   const name: string = desc.name ?? ""
   const fullName = parentFqn ? `${parentFqn}.${name}` : name
   const isMapEntry: boolean = desc.options?.map_entry === true
 
-  const fields: FieldInfo[] = (desc.field ?? []).map((f: any) => ({
-    name: f.name ?? "",
-    number: f.number ?? 0,
-    type: f.type ?? 0,
-    typeName: f.type_name,
-    label: f.label ?? 1,
-    oneofIndex: f.oneof_index
-  }))
+  const fields: FieldInfo[] = (desc.field ?? []).map((f: any) => {
+    const field: FieldInfo = {
+      name: f.name ?? "",
+      number: f.number ?? 0,
+      type: f.type ?? 0,
+      typeName: f.type_name,
+      label: f.label ?? 1,
+      oneofIndex: f.oneof_index
+    }
+    // Enrich enum fields with UDVT metadata
+    if (field.type === 14 && field.typeName) {
+      const enumDesc = enumRegistry.get(field.typeName)
+      if (enumDesc) {
+        field.enumInfo = {
+          solTypeName: protoNameToSol(field.typeName),
+          underlyingType: enumDesc.underlyingType
+        }
+      }
+    }
+    return field
+  })
 
   const nestedMessages: MessageDescriptor[] = (desc.nested_type ?? []).map(
-    (nested: any) => convertDescriptor(nested, fullName)
+    (nested: any) => convertDescriptor(nested, fullName, enumRegistry)
   )
 
   return { name, fullName, fields, nestedMessages, isMapEntry }
+}
+
+/**
+ * Extract enum descriptors from a proto file (both file-level and nested in messages).
+ */
+function extractEnums(protoFile: any, packageName: string): EnumDescriptor[] {
+  const result: EnumDescriptor[] = []
+
+  function walkEnums(enums: any[], parentFqn: string) {
+    for (const e of enums) {
+      const name: string = e.name ?? ""
+      const fullName = parentFqn ? `${parentFqn}.${name}` : name
+      const values = (e.value ?? []).map((v: any) => ({
+        name: v.name ?? "",
+        number: v.number ?? 0
+      }))
+      result.push({
+        name,
+        fullName,
+        values,
+        underlyingType: computeUnderlyingType(values)
+      })
+    }
+  }
+
+  function walkMessages(messages: any[], parentFqn: string) {
+    for (const msg of messages) {
+      const name: string = msg.name ?? ""
+      const msgFqn = parentFqn ? `${parentFqn}.${name}` : name
+      walkEnums(msg.enum_type ?? [], msgFqn)
+      walkMessages(msg.nested_type ?? [], msgFqn)
+    }
+  }
+
+  walkEnums(protoFile.enum_type ?? [], packageName)
+  walkMessages(protoFile.message_type ?? [], packageName)
+
+  return result
 }
 
 /**

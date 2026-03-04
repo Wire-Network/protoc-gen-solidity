@@ -5,7 +5,10 @@ import {
   fieldTag,
   resolveSolType
 } from "./type-map.js"
+import type { EnumFieldInfo } from "./enum.js"
 import { log } from "../util/logger.js"
+
+export type { EnumFieldInfo } from "./enum.js"
 
 /** Parsed field descriptor subset needed for codegen. */
 export interface FieldInfo {
@@ -15,7 +18,8 @@ export interface FieldInfo {
   typeName?: string
   label: number // 1=optional, 2=required, 3=repeated
   oneofIndex?: number
-  mapEntry?: { keyType: number; valueType: number; valueTypeName?: string }
+  mapEntry?: { keyType: number; valueType: number; valueTypeName?: string; valueEnumInfo?: EnumFieldInfo }
+  enumInfo?: EnumFieldInfo
 }
 
 /** Check if field is repeated (label == 3). */
@@ -26,6 +30,11 @@ export function isRepeated(field: FieldInfo): boolean {
 /** Check if field is a message type (type == 11). */
 export function isMessage(field: FieldInfo): boolean {
   return field.type === 11
+}
+
+/** Check if field is an enum type with resolved enum info. */
+export function isEnum(field: FieldInfo): boolean {
+  return field.type === 14 && !!field.enumInfo
 }
 
 /**
@@ -87,6 +96,10 @@ export function genFieldEncode(field: FieldInfo, varName: string): string {
     return genMessageEncode(field, solName, tagHex, varName)
   }
 
+  if (field.enumInfo) {
+    return genEnumFieldEncode(field, solName, tagHex, varName)
+  }
+
   return genScalarEncode(solName, typeInfo, tagHex, varName)
 }
 
@@ -132,6 +145,10 @@ export function genFieldDecode(field: FieldInfo, varName: string): DecodeBranch 
     return { tag, body: genMessageDecode(field, solName, varName) }
   }
 
+  if (field.enumInfo) {
+    return { tag, body: genEnumFieldDecode(field, solName, varName) }
+  }
+
   return { tag, body: genScalarDecode(solName, typeInfo, varName) }
 }
 
@@ -171,6 +188,32 @@ function needsVarintEncodeCast(typeInfo: (typeof PROTO_TYPE_MAP)[number]): boole
 }
 
 // ── Internal codegen helpers ──────────────────────────────────────────
+
+function genEnumFieldEncode(
+  field: FieldInfo,
+  solName: string,
+  tagHex: string,
+  varName: string
+): string {
+  const ei = field.enumInfo!
+  return [
+    `    buf = abi.encodePacked(buf, ProtobufRuntime._encode_key(${tagHex}));`,
+    `    buf = abi.encodePacked(buf, ProtobufRuntime._encode_varint(uint64(${ei.solTypeName}.unwrap(${varName}.${solName}))));`
+  ].join("\n")
+}
+
+function genEnumFieldDecode(
+  field: FieldInfo,
+  solName: string,
+  varName: string
+): string {
+  const ei = field.enumInfo!
+  return [
+    `        { uint64 _v;`,
+    `        (_v, pos) = ProtobufRuntime._decode_varint(data, pos);`,
+    `        ${varName}.${solName} = ${ei.solTypeName}.wrap(${ei.underlyingType}(_v)); }`
+  ].join("\n")
+}
 
 function genScalarEncode(
   solName: string,
@@ -222,6 +265,11 @@ function genRepeatedEncode(
       `      buf = abi.encodePacked(buf, ProtobufRuntime._encode_varint(uint64(_elem.length)));`,
       `      buf = abi.encodePacked(buf, _elem);`
     )
+  } else if (field.enumInfo) {
+    const ei = field.enumInfo
+    lines.push(
+      `      buf = abi.encodePacked(buf, ProtobufRuntime._encode_varint(uint64(${ei.solTypeName}.unwrap(${varName}.${solName}[${loopVar}]))));`
+    )
   } else {
     const elemExpr = needsVarintEncodeCast(typeInfo)
       ? castToUint64(typeInfo.solType, `${varName}.${solName}[${loopVar}]`)
@@ -258,6 +306,12 @@ function genMapEncode(field: FieldInfo, tagHex: string, varName: string): string
       `      _entry = abi.encodePacked(_entry, ProtobufRuntime._encode_key(${fieldTag(2, WireType.LengthDelimited)}));`,
       `      _entry = abi.encodePacked(_entry, ProtobufRuntime._encode_varint(uint64(_val.length)));`,
       `      _entry = abi.encodePacked(_entry, _val);`
+    )
+  } else if (me.valueType === 14 && field.mapEntry?.valueEnumInfo) {
+    const vei = field.mapEntry.valueEnumInfo
+    lines.push(
+      `      _entry = abi.encodePacked(_entry, ProtobufRuntime._encode_key(${fieldTag(2, valInfo.wireType)}));`,
+      `      _entry = abi.encodePacked(_entry, ProtobufRuntime._encode_varint(uint64(${vei.solTypeName}.unwrap(${varName}.${solName}_values[${loopVar}]))));`
     )
   } else {
     lines.push(
@@ -325,6 +379,15 @@ function genRepeatedDecode(
     ].join("\n")
   }
 
+  if (field.enumInfo) {
+    const ei = field.enumInfo
+    return [
+      `        { uint64 _elem;`,
+      `        (_elem, pos) = ProtobufRuntime._decode_varint(data, pos);`,
+      `        ${varName}.${solName}[${idxVar}++] = ${ei.solTypeName}.wrap(${ei.underlyingType}(_elem)); }`
+    ].join("\n")
+  }
+
   if (needsVarintDecodeCast(typeInfo)) {
     const cast = castFromUint64(typeInfo.solType, "_elem")
     return [
@@ -372,6 +435,14 @@ function genMapDecode(field: FieldInfo, solName: string, varName: string): strin
       `            bytes memory _vSub = ProtobufRuntime._slice(data, pos, pos + uint256(_vLen));`,
       `            _val = ${nestedCodec}.decode(_vSub);`,
       `            pos += uint256(_vLen);`
+    )
+  } else if (me.valueType === 14 && field.mapEntry?.valueEnumInfo) {
+    const vei = field.mapEntry.valueEnumInfo
+    lines.push(
+      `          } else if (_entryTag == ${fieldTag(2, valInfo.wireType)}) {`,
+      `            { uint64 _raw;`,
+      `            (_raw, pos) = ProtobufRuntime._decode_varint(data, pos);`,
+      `            _val = ${vei.solTypeName}.wrap(${vei.underlyingType}(_raw)); }`
     )
   } else {
     lines.push(
