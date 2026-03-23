@@ -1,5 +1,7 @@
 # protoc-gen-solidity
 
+> ARCHIVED - Officially moved into [Wire-Network/wire-libraries-ts](https://github.com/Wire-Network/wire-libraries-ts)
+
 A `protoc` plugin that generates Solidity libraries with full protobuf3 wire
 format **encode** and **decode** support for on-chain / off-chain
 interoperability.
